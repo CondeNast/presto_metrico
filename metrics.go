@@ -16,7 +16,6 @@ var (
 	coordinator string // Global variable set via environment variable
 	jmxBeans    = map[string]string{
 		"queryManager":         "com.facebook.presto.execution:name=QueryManager",
-		"taskExecutor":         "com.facebook.presto.execution:name=TaskExecutor",
 		"taskManager":          "com.facebook.presto.execution:name=TaskManager",
 		"memoryPoolGeneral":    "com.facebook.presto.memory:type=MemoryPool,name=general",
 		"clusterMemoryManager": "com.facebook.presto.memory:name=ClusterMemoryManager",
@@ -97,13 +96,6 @@ var (
 		"UserErrorFailures.OneMinute.Count":                 "queryManager",
 		"UserErrorFailures.OneMinute.Rate":                  "queryManager",
 		"UserErrorFailures.TotalCount":                      "queryManager",
-		"ProcessorExecutor.QueuedTaskCount":                 "taskExecutor",
-		"BlockedSplits":                                     "taskExecutor",
-		"PendingSplits":                                     "taskExecutor",
-		"RunningSplits":                                     "taskExecutor",
-		"QueuedTime.FifteenMinutes.P95":                     "taskExecutor",
-		"QueuedTime.FiveMinutes.P95":                        "taskExecutor",
-		"QueuedTime.OneMinute.P95":                          "taskExecutor",
 		"InputDataSize.FifteenMinute.Count":                 "taskManager",
 		"InputDataSize.FifteenMinute.Rate":                  "taskManager",
 		"InputDataSize.FiveMinute.Count":                    "taskManager",
@@ -194,13 +186,13 @@ func retriveRawMetricResponse(metricName string) (*http.Response, error) {
 	return resp, err
 }
 
-func decodeRawMetricResponse(resp *http.Response) (JMXMetric, error) {
+func decodeRawMetricResponse(resp *http.Response) (*JMXMetric, error) {
 	defer resp.Body.Close()
 
 	decoder := json.NewDecoder(resp.Body)
 	var jmxMetric JMXMetric
 	err := decoder.Decode(&jmxMetric)
-	return jmxMetric, err
+	return &jmxMetric, err
 }
 
 func getMetric(metricName string) (*JMXMetric, error) {
@@ -210,15 +202,19 @@ func getMetric(metricName string) (*JMXMetric, error) {
 		return nil, err
 	}
 
-	jmxMetric, err := decodeRawMetricResponse(resp)
-	return &jmxMetric, err
+	return decodeRawMetricResponse(resp)
 }
 
 func sendJMXMetric(client *dogstatsd.Client, metricCatagory string, attribute JMXMetricAttribute) {
 	_, ok := datadogMetrics[attribute.Name]
 	if ok {
-		datadogLabel := fmt.Sprintf("data.presto.%s.%s", metricCatagory, attribute.Name)
-		client.Gauge(datadogLabel, attribute.Value.(float64), nil, 1.0)
+		switch val := attribute.Value.(type) {
+		case float64:
+			datadogLabel := fmt.Sprintf("data.presto.%s.%s", metricCatagory, attribute.Name)
+			client.Gauge(datadogLabel, val, nil, 1.0)
+		default:
+			log.Printf("skipping attribute %q: cannot handle value %v type %T", attribute.Name, val, val)
+		}
 	}
 }
 
@@ -229,7 +225,7 @@ func ProcessJMXMetrics(client *dogstatsd.Client) {
 		metric, err := getMetric(metricName)
 
 		if err != nil {
-			log.Println(err)
+			log.Printf("getMetric(%q): %v", metricName, err)
 			continue
 		}
 

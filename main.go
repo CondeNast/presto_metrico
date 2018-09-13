@@ -35,12 +35,8 @@ func printHelp() {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		printHelp()
-	}
-
 	commandOptions.Parse(os.Args)
-	os.Setenv("PRESTO_COORDINATOR", *coordinatorOpts)
+	os.Setenv("PRESTO_COORDINATOR", "http://127.0.0.1:8889")
 	log.Println("Starting Presto Metrico")
 
 	client, err := dogstatsd.New(*dogstatsdServerOpts)
